@@ -1,0 +1,457 @@
+# LLM Playground with R and ellmer
+
+This R Markdown notebook demonstrates how to interact with Large Language Models using the `ellmer` package in R. We'll explore text generation, structured data extraction and various AI capabilities.
+
+## Setup
+
+First, let's install and load the necessary packages:
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r install-packages, eval=FALSE}
+# Install required packages
+install.packages(c("ellmer", "httr", "jsonlite", "rvest", "dplyr", "knitr"))
+```
+
+```{r load-packages}
+library(ellmer)
+library(httr)
+library(jsonlite)
+library(rvest)
+library(dplyr)
+library(knitr)
+```
+
+### API Configuration
+
+You'll need to set up your API keys. For this example, we'll use OpenAI, but ellmer supports multiple providers including Anthropic Claude, Google Gemini, and others.
+
+```{r api-setup, eval=FALSE}
+# Set your API key (do this once)
+# Option 1: Set environment variable
+Sys.setenv(OPENAI_API_KEY = "your-api-key-here")
+
+# Option 2: Use ellmer's key management
+# ellmer::set_api_key("openai", "your-api-key-here")
+```
+
+```{r verify-setup}
+# Verify the setup with a simple test
+test_response <- chat("What are three benefits of using R for data analysis?")
+print(test_response)
+```
+
+## Text Models and Summarization
+
+Let's start by fetching web content and summarizing it using an LLM:
+
+```{r web-scraping}
+# Function to fetch and clean web content
+fetch_article <- function(url) {
+  tryCatch({
+    page <- read_html(url)
+    # Extract main content (adjust selector as needed)
+    content <- page %>% 
+      html_nodes(".simple-leftstream, article, main, .content") %>% 
+      html_text() %>%
+      paste(collapse = "\n")
+    
+    # Clean up whitespace
+    content <- gsub("\\s+", " ", content)
+    content <- trimws(content)
+    
+    return(content)
+  }, error = function(e) {
+    return(paste("Error fetching content:", e$message))
+  })
+}
+
+# Fetch the Nieman Lab article
+article_url <- "https://www.niemanlab.org/2025/02/meet-the-journalists-training-ai-models-for-meta-and-openai/"
+article_text <- fetch_article(article_url)
+
+# Display first 500 characters
+cat("Article preview:\n")
+cat(substr(article_text, 1, 500), "...\n")
+```
+
+```{r summarize-article}
+# Summarize the article
+if(nchar(article_text) > 100) {
+  summary_prompt <- paste(
+    "Please summarize the following article in 3 paragraphs:",
+    article_text
+  )
+  
+  article_summary <- chat(summary_prompt)
+  cat("Article Summary:\n")
+  cat(article_summary)
+} else {
+  cat("Article content too short or failed to fetch properly")
+}
+```
+
+**Your Analysis:** Compare this summary to the original article. How well did the LLM capture the key points?
+
+*PUT YOUR ANSWER HERE*
+
+## Structured Data Extraction
+
+Now let's work with the Maryland attorney sanctions data and convert it to structured JSON:
+
+```{r load-sanctions-data}
+# Read the sanctions text file
+sanctions_text <- readLines("sanctionsfy25.txt", warn = FALSE)
+sanctions_content <- paste(sanctions_text, collapse = "\n")
+
+# Display first few lines
+cat("Sanctions data preview:\n")
+cat(paste(head(sanctions_text, 10), collapse = "\n"))
+```
+
+```{r extract-structured-data}
+# Create prompt for structured data extraction
+extraction_prompt <- paste(
+  "Based on the following text about attorney sanctions, produce only a valid JSON array containing objects with these keys: name, sanction, date, description.",
+  "The date should be in yyyy-mm-dd format. Return only the JSON array with no additional text or explanation.",
+  "\nText:",
+  sanctions_content
+)
+
+# Get structured data from LLM
+structured_response <- chat(extraction_prompt)
+
+# Display the response
+cat("Structured Data Response:\n")
+cat(structured_response)
+```
+
+```{r parse-json-data}
+# Try to parse the JSON response
+tryCatch({
+  sanctions_data <- fromJSON(structured_response)
+  
+  if(is.data.frame(sanctions_data)) {
+    cat("\nSuccessfully parsed", nrow(sanctions_data), "records:\n")
+    kable(head(sanctions_data, 5))
+  } else {
+    cat("\nParsed data structure:\n")
+    str(sanctions_data)
+  }
+}, error = function(e) {
+  cat("Error parsing JSON:", e$message, "\n")
+  cat("Raw response was:", substr(structured_response, 1, 200), "...\n")
+})
+```
+
+### Your Turn: Custom Data Extraction
+
+Find a short text file (3 pages or less) and upload it to your project. Then modify the code below to extract structured data from it:
+
+```{r custom-extraction, eval=FALSE}
+# Read your custom file
+# custom_text <- readLines("your-file.txt", warn = FALSE)
+# custom_content <- paste(custom_text, collapse = "\n")
+
+# Create your extraction prompt
+# your_prompt <- paste(
+#   "Extract structured data from this text with the following keys: [specify your keys]",
+#   "Return only a JSON array.",
+#   "\nText:",
+#   custom_content
+# )
+
+# Extract the data
+# your_response <- chat(your_prompt)
+# cat(your_response)
+```
+
+**Your Evaluation:** How well did the LLM perform on your custom data extraction task?
+
+*PUT YOUR EVALUATION HERE*
+
+## Vision Models (Image Analysis)
+
+Let's analyze images using vision-capable models. The ellmer package supports vision models from providers like OpenAI GPT-4V and Google Gemini.
+
+```{r image-analysis}
+# Function to analyze images
+analyze_image <- function(image_path, question, model = "gpt-4-vision-preview") {
+  tryCatch({
+    # Read image as base64
+    img_data <- base64enc::base64encode(image_path)
+    
+    # Create vision prompt
+    response <- chat_openai(
+      messages = list(
+        list(
+          role = "user",
+          content = list(
+            list(type = "text", text = question),
+            list(
+              type = "image_url",
+              image_url = list(url = paste0("data:image/png;base64,", img_data))
+            )
+          )
+        )
+      ),
+      model = model
+    )
+    
+    return(response$choices[[1]]$message$content)
+  }, error = function(e) {
+    return(paste("Error analyzing image:", e$message))
+  })
+}
+
+# Analyze the MD document image
+if(file.exists("md_doc.png")) {
+  license_question <- "What is the license number from this image?"
+  license_response <- analyze_image("md_doc.png", license_question)
+  
+  cat("License Number Analysis:\n")
+  cat(license_response)
+} else {
+  cat("md_doc.png not found. Please add the image file to analyze it.")
+}
+```
+
+### Your Turn: Custom Image Analysis
+
+Add your own image (PNG, JPG, or GIF) and analyze it:
+
+```{r custom-image-analysis, eval=FALSE}
+# Replace with your image file and question
+# your_image <- "your_image.png"  
+# your_question <- "Describe what you see in this image"
+
+# if(file.exists(your_image)) {
+#   your_response <- analyze_image(your_image, your_question)
+#   cat("Your Image Analysis:\n")
+#   cat(your_response)
+# } else {
+#   cat("Image file not found")
+# }
+```
+
+**Your Evaluation:** How well did the vision model perform on your image?
+
+*PUT YOUR EVALUATION HERE*
+
+## Audio Transcription
+
+For audio transcription, we can use OpenAI's Whisper model through the ellmer package:
+
+```{r audio-transcription, eval=FALSE}
+# Function to transcribe audio
+transcribe_audio <- function(audio_file) {
+  tryCatch({
+    # Note: This requires the audio file to be accessible
+    # You would typically use OpenAI's audio API here
+    
+    # Placeholder for audio transcription
+    # In practice, you'd use:
+    # result <- openai_audio_transcription(audio_file)
+    
+    return("Audio transcription functionality requires audio file upload and API integration")
+  }, error = function(e) {
+    return(paste("Error transcribing audio:", e$message))
+  })
+}
+
+# Example usage (when you have an audio file)
+# audio_file <- "new-mexico-chuck-wagon-etiquette.mp3"
+# if(file.exists(audio_file)) {
+#   transcription <- transcribe_audio(audio_file)
+#   cat("Transcription:\n")
+#   cat(transcription)
+# }
+```
+
+**Your Evaluation:** How did the audio transcription compare to the original transcript?
+
+*PUT YOUR EVALUATION HERE*
+
+## Exploring Different Models and Providers
+
+The ellmer package supports multiple AI providers. Let's compare responses from different models:
+
+```{r model-comparison}
+# Test prompt
+test_prompt <- "Explain the difference between supervised and unsupervised machine learning in simple terms."
+
+# Function to safely test different models
+test_model <- function(prompt, model_name) {
+  tryCatch({
+    response <- chat(prompt, model = model_name)
+    return(response)
+  }, error = function(e) {
+    return(paste("Error with", model_name, ":", e$message))
+  })
+}
+
+# Test different models (adjust based on your available API keys)
+models_to_test <- c("gpt-3.5-turbo", "gpt-4", "claude-3-sonnet")
+
+for(model in models_to_test) {
+  cat("\n--- Model:", model, "---\n")
+  response <- test_model(test_prompt, model)
+  cat(substr(response, 1, 300), "...\n")
+}
+```
+
+## Advanced Prompting Techniques
+
+Let's explore some advanced prompting strategies:
+
+```{r advanced-prompting}
+# Chain of Thought prompting
+cot_prompt <- "Let's think step by step. A store sells apples for $2 per pound and oranges for $3 per pound. If someone buys 4 pounds of apples and 2 pounds of oranges, what's the total cost?"
+
+cot_response <- chat(cot_prompt)
+cat("Chain of Thought Response:\n")
+cat(cot_response)
+
+cat("\n" , rep("=", 50), "\n")
+
+# Few-shot prompting example
+few_shot_prompt <- "
+Here are some examples of converting informal text to formal business language:
+
+Informal: 'Hey, can you send me that report ASAP?'
+Formal: 'Could you please provide the report at your earliest convenience?'
+
+Informal: 'The meeting was a total disaster.'
+Formal: 'The meeting did not proceed as planned and requires follow-up.'
+
+Now convert this informal text to formal:
+Informal: 'This project is way behind schedule and we're gonna miss the deadline.'
+Formal:"
+
+few_shot_response <- chat(few_shot_prompt)
+cat("Few-shot Learning Response:\n")
+cat(few_shot_response)
+```
+
+## How You Could Use AI in Your News App Project
+
+Think about your chosen news app project and consider these applications:
+
+```{r news-app-ideas}
+# Example applications for news apps
+news_app_examples <- list(
+  "Data Collection" = c(
+    "Scrape and summarize press releases",
+    "Extract key facts from government documents",
+    "Monitor social media for breaking news trends"
+  ),
+  "Data Processing" = c(
+    "Clean and standardize address data",
+    "Extract entities (people, places, organizations) from text",
+    "Convert PDFs to structured data"
+  ),
+  "Content Enhancement" = c(
+    "Generate article summaries",
+    "Create data visualizations descriptions",
+    "Fact-check claims against databases"
+  ),
+  "User Experience" = c(
+    "Provide natural language search",
+    "Generate personalized content recommendations",
+    "Create accessible alt-text for images"
+  )
+)
+
+for(category in names(news_app_examples)) {
+  cat("\n**", category, ":**\n")
+  for(example in news_app_examples[[category]]) {
+    cat("- ", example, "\n")
+  }
+}
+```
+
+### Your Specific Ideas
+
+Based on your news app project, write specific examples of how you might use LLMs:
+
+**PUT YOUR ANSWERS HERE**
+
+1. Data Collection: [Your specific example]
+2. Data Processing: [Your specific example]  
+3. Content Analysis: [Your specific example]
+4. User Interface: [Your specific example]
+
+## Best Practices and Considerations
+
+```{r best-practices}
+# Demonstrate error handling and rate limiting
+safe_chat <- function(prompt, max_retries = 3, delay = 1) {
+  for(attempt in 1:max_retries) {
+    tryCatch({
+      response <- chat(prompt)
+      return(response)
+    }, error = function(e) {
+      if(attempt == max_retries) {
+        return(paste("Failed after", max_retries, "attempts:", e$message))
+      }
+      Sys.sleep(delay)
+    })
+  }
+}
+
+# Example of prompt validation
+validate_prompt <- function(prompt, max_length = 4000) {
+  if(nchar(prompt) > max_length) {
+    warning("Prompt may be too long. Consider summarizing.")
+    return(substr(prompt, 1, max_length))
+  }
+  return(prompt)
+}
+
+# Cost estimation helper
+estimate_tokens <- function(text) {
+  # Rough estimation: 1 token ≈ 4 characters
+  estimated_tokens <- ceiling(nchar(text) / 4)
+  cat("Estimated tokens:", estimated_tokens, "\n")
+  return(estimated_tokens)
+}
+
+# Example usage
+example_prompt <- "Analyze this data and provide insights..."
+estimate_tokens(example_prompt)
+```
+
+## Conclusion
+
+This notebook has demonstrated various ways to use LLMs through R and the ellmer package:
+
+- Text summarization and analysis
+- Structured data extraction
+- Image analysis (vision models)
+- Audio transcription
+- Model comparison
+- Advanced prompting techniques
+
+Key takeaways:
+1. Always handle errors gracefully when working with APIs
+2. Consider token limits and costs
+3. Validate and clean your data before sending to models
+4. Use appropriate models for specific tasks
+5. Implement retry logic for robustness
+
+## Session Information
+
+```{r session-info}
+sessionInfo()
+```
+
+---
+
+**Remember to:**
+1. Replace placeholder API keys with your actual keys
+2. Test with your own data files
+3. Complete the evaluation sections
+4. Add your specific use cases for your news app project
+5. Commit and push your completed work to GitHub
