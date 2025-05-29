@@ -93,7 +93,7 @@ Compare this summary to the original article. How well did the LLM capture the k
 
 ## Structured Data Extraction
 
-Now let's work with the Maryland attorney sanctions data and convert it to structured JSON:
+Ellmer does support the production of structured output (data), but Groq doesn't yet support that, so we're going to do things the old-fashioned way. Let's work with the Maryland attorney sanctions data and convert it to JSON that we can then turn into a dataframe:
 
 ```{r load-sanctions-data}
 # Read the sanctions text file
@@ -106,9 +106,9 @@ cat(paste(head(sanctions_text, 10), collapse = "\n"))
 ```
 
 ```{r extract-structured-data}
-# Create prompt for structured data extraction (matching the original Python version)
+# Create prompt for structured data extraction
 structured_response <- chat$chat(paste(
-  "extract structured data based on the text with the following keys: name, sanction, date, description.",
+  "produce only a list of JSON objects based on the text with the following keys: name, sanction, date, description.",
   "The date should be in the yyyy-mm-dd format. No yapping.",
   "\nText:",
   sanctions_content
@@ -119,6 +119,8 @@ structured_response <- chat$chat(paste(
 cat("Structured Data Response:\n")
 cat(structured_response)
 ```
+
+Then we can clean that up a bit and turn it into tidy data:
 
 ```{r parse-json-data}
 # Parse the JSON response
@@ -148,6 +150,17 @@ license_number <- chat$chat("what is the license number from this image?", image
 
 ```
 
+
+```{r}
+
+pdf <- content_image_file("BlackPop1930.pdf")
+
+extract_csv <- chat$chat("what is the license number from this image?", image)
+
+```
+
+
+
 ### Your Turn: Find an image from the web and ask Llama 4 a question about it using `content_image_url()`
 
 
@@ -159,3 +172,6 @@ license_number <- chat$chat("what is the license number from this image?", image
 How well did the vision model perform on your image?
 
 
+### Audio Models
+
+Another option is to use models that transcribe audio. Download and listen to [this mp3 file](https://dare.wisc.edu/audio/new-mexico-chuck-wagon-etiquette/) from the Dictionary of American Regional English project at the University of Wisconsin. Then, in Groq's dev console, change the model to `distil-whisper-large-v3-en` and upload the mp3 file using the "Select File" button. Then hit submit and check out the transcript. How did the LLM do compared to the original transcript?
