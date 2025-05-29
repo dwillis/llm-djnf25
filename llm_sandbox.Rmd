@@ -1,10 +1,12 @@
 # LLM Playground with R and ellmer
 
-This R Markdown notebook demonstrates how to interact with Large Language Models using the `ellmer` package in R. We'll explore text generation, structured data extraction, and various AI capabilities.
+This notebook demonstrates how to interact with Large Language Models using the `ellmer` package in R. We'll explore text generation, structured data extraction, and various AI capabilities.
 
 ## Setup
 
-First, let's install and load the necessary packages:
+You'll need to set up your Groq API key. Get one from https://console.groq.com/keys, and then set it in your .Renviron file using `usethis::edit_r_environ()`. Restart R for it to take effect.
+
+Then, let's install and load the necessary packages:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
@@ -12,71 +14,56 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 
 ```{r install-packages, eval=FALSE}
 # Install required packages
-install.packages(c("ellmer", "httr", "jsonlite", "rvest", "dplyr", "knitr"))
+install.packages(c("ellmer", "httr", "jsonlite", "rvest"))
 ```
 
 ```{r load-packages}
+library(tidyverse)
+library(lubridate)
 library(ellmer)
 library(httr)
 library(jsonlite)
 library(rvest)
-library(dplyr)
-library(knitr)
 ```
 
-### API Configuration
+### Testing Out Groq Using Llama 4
 
-You'll need to set up your Groq API key. Get one from https://console.groq.com/keys
-
-```{r api-setup, eval=FALSE}
-# Set your Groq API key as environment variable
-Sys.setenv(GROQ_API_KEY = "your-groq-api-key-here")
-```
+We'll use one of Groq's recent additions, the Llama 4 Scout model from Meta. In ellmer, you construct a chat object like this:
 
 ```{r groq-setup}
-# Configure ellmer to use Groq
-library(ellmer)
 
-# Set up Groq provider in ellmer
-groq_provider <- provider_groq(
-  api_key = Sys.getenv("GROQ_API_KEY"),
-  base_url = "https://api.groq.com/openai/v1"
+# Set the model
+chat <- chat_groq(
+  model = "meta-llama/llama-4-scout-17b-16e-instruct"
 )
 
-# Available Groq models
-groq_models <- c(
-  "meta-llama/llama-4-scout-17b-16e-instruct",    # Newest model
-  "llama-3.3-70b-versatile",    # Good large model
-  "llama-3.1-8b-instant",      # Fastest responses
-  "qwen-qwq-32b"         # Good medium-sized model
-)
+chat$chat("Give me 20 names for a pet turtle")
 
-# Set default model
-default_model <- "llama-3.3-70b-versatile"
-
-# Test the setup
-test_response <- chat(
-  "Give me 20 names for a pet turtle",
-  provider = groq_provider,
-  model = default_model
-)
-cat("Setup Test Response:\n")
-cat(test_response)
 ```
 
 ## Text Models and Summarization
 
-Let's start by fetching web content and summarizing it using an LLM:
+Let's start by fetching web content and summarizing it using an LLM. We need to add some custom headers to mimic a browser because Nieman Lab doesn't like folks scraping their content.
 
 ```{r web-scraping}
 # Function to fetch and clean web content
 fetch_article <- function(url) {
   tryCatch({
-    page <- read_html(url)
-    # Extract main content (adjust selector as needed)
-    content <- page %>% 
-      html_nodes(".simple-leftstream, article, main, .content") %>% 
-      html_text() %>%
+    page <- read_html(GET(url, 
+        add_headers(
+      "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      "Accept" = "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+      "Accept-Language" = "en-US,en;q=0.5",
+      "Accept-Encoding" = "gzip, deflate",
+      "Connection" = "keep-alive",
+      "Referer" = "https://www.google.com/"
+    ),
+      timeout(30)
+    ))
+    # Extract story content using css selectors
+    content <- page |> 
+      html_nodes(".simple-leftstream, article, main, .content") |> 
+      html_text() |>
       paste(collapse = "\n")
     
     # Clean up whitespace
@@ -92,33 +79,17 @@ fetch_article <- function(url) {
 # Fetch the Nieman Lab article
 article_url <- "https://www.niemanlab.org/2025/02/meet-the-journalists-training-ai-models-for-meta-and-openai/"
 article_text <- fetch_article(article_url)
-
-# Display first 500 characters
-cat("Article preview:\n")
-cat(substr(article_text, 1, 500), "...\n")
 ```
 
 ```{r summarize-article}
-# Summarize the article using Groq via ellmer
-if(nchar(article_text) > 100) {
-  summary_prompt <- paste(
+
+chat$chat(paste(
     "Summarize this story in 3 paragraphs:",
-    article_text
-  )
-  
-  article_summary <- chat(
-    summary_prompt,
-    provider = groq_provider,
-    model = default_model
-  )
-  cat("Article Summary:\n")
-  cat(article_summary)
-} else {
-  cat("Article content too short or failed to fetch properly")
-}
+    article_text)
+)
 ```
 
-**Your Analysis:** Compare this summary to the original article. How well did the LLM capture the key points?
+Compare this summary to the original article. How well did the LLM capture the key points?
 
 ## Structured Data Extraction
 
@@ -136,30 +107,13 @@ cat(paste(head(sanctions_text, 10), collapse = "\n"))
 
 ```{r extract-structured-data}
 # Create prompt for structured data extraction (matching the original Python version)
-extraction_prompt <- paste(
-  "Produce only an array of JSON objects based on the text with the following keys: name, sanction, date, description.",
+structured_response <- chat$chat(paste(
+  "extract structured data based on the text with the following keys: name, sanction, date, description.",
   "The date should be in the yyyy-mm-dd format. No yapping.",
   "\nText:",
   sanctions_content
-)
+))
 
-# Get structured data from Groq via ellmer
-structured_response <- chat(
-  extraction_prompt,
-  provider = groq_provider,
-  model = default_model
-)
-
-# Display the response
-cat("Structured Data Response:\n")
-cat(structured_response)
-```d format. Return only the JSON array with no additional text or explanation.",
-  "\nText:",
-  sanctions_content
-)
-
-# Get structured data from LLM
-structured_response <- chat(extraction_prompt)
 
 # Display the response
 cat("Structured Data Response:\n")
@@ -167,378 +121,41 @@ cat(structured_response)
 ```
 
 ```{r parse-json-data}
-# Try to parse the JSON response
-tryCatch({
-  sanctions_data <- fromJSON(structured_response)
-  
-  if(is.data.frame(sanctions_data)) {
-    cat("\nSuccessfully parsed", nrow(sanctions_data), "records:\n")
-    kable(head(sanctions_data, 5))
-  } else {
-    cat("\nParsed data structure:\n")
-    str(sanctions_data)
-  }
-}, error = function(e) {
-  cat("Error parsing JSON:", e$message, "\n")
-  cat("Raw response was:", substr(structured_response, 1, 200), "...\n")
-})
+# Parse the JSON response
+
+json_content <- structured_response |>
+  gsub("```json\n?", "", .) |>
+  gsub("\n?```", "", .) |>
+  trimws()
+
+sanctions_df <- fromJSON(json_content) |>
+  as_tibble() |>
+  mutate(date = ymd(date))
+
 ```
 
-### Your Turn: Custom Data Extraction
-
-Find a short text file (3 pages or less) and upload it to your project. Then modify the code below to extract structured data from it:
-
-```{r custom-extraction, eval=FALSE}
-# Read your custom file
-# custom_text <- readLines("your-file.txt", warn = FALSE)
-# custom_content <- paste(custom_text, collapse = "\n")
-
-# Create your extraction prompt
-# your_prompt <- paste(
-#   "Extract structured data from this text with the following keys: [specify your keys]",
-#   "Return only a JSON array. No yapping.",
-#   "\nText:",
-#   custom_content
-# )
-
-# Extract the data using Groq
-# your_response <- chat(
-#   your_prompt,
-#   provider = groq_provider,
-#   model = default_model
-# )
-# cat(your_response)
-```
-
-**Your Evaluation:** How well did the LLM perform on your custom data extraction task?
+**Your Evaluation:** How well did the LLM perform on this data extraction task? How should we evaluate it?
 
 ## Vision Models (Image Analysis)
 
-Note: Groq currently supports text models but not vision models. For image analysis, you would need to use a different provider like OpenAI GPT-4V or Google Gemini. Here's how you could set up multiple providers with ellmer:
+Groq currently supports a few multimodal models, including the two from Llama 4 models from Meta. You can pass local images or image URLs to it using the `content_image_file()` and `content_image_url()` functions from ellmer. Take a look at the `md_doc.png` file in this repository.
 
 ```{r vision-setup}
-# For vision tasks, you'd need a different provider
-# Example setup for OpenAI (for vision) alongside Groq (for text)
 
-vision_setup_example <- function() {
-  # This would require an OpenAI API key for vision models
-  # openai_provider <- provider_openai(api_key = Sys.getenv("OPENAI_API_KEY"))
-  
-  # Then you could use different providers for different tasks:
-  # Text tasks: use groq_provider with fast inference
-  # Vision tasks: use openai_provider with GPT-4V
-  
-  cat("Vision models require a separate provider like OpenAI or Google Gemini\n")
-  cat("Groq specializes in fast text inference with models like Llama and Mixtral\n")
-}
+image <- content_image_file("md_doc.png")
 
-vision_setup_example()
+license_number <- chat$chat("what is the license number from this image?", image)
 
 ```
 
-### Your Turn: Using Groq for Text Analysis Instead
+### Your Turn: Find an image from the web and ask Llama 4 a question about it using `content_image_url()`
 
-Since Groq excels at text processing, let's analyze text descriptions of images instead:
 
-```{r text-analysis-alternative}
-# Instead of image analysis, let's use Groq's strength: fast text processing
-document_description <- "This is a Maryland physician discipline document showing a license number D25922 for a disciplinary action dated March 15, 2024, regarding improper prescribing practices."
+```{r}
 
-analysis_prompt <- "Extract all key information from this document description: license numbers, dates, violations, and any other important details. Format as structured data."
 
-if(exists("groq_provider")) {
-  text_analysis <- chat(
-    analysis_prompt,
-    provider = groq_provider,
-    model = default_model
-  )
-  
-  cat("Text Analysis Result:\n")
-  cat(text_analysis)
-} else {
-  cat("Groq provider not configured")
-}
 ```
 
-**Your Evaluation:** How well did the vision model perform on your image?
+How well did the vision model perform on your image?
 
-*PUT YOUR EVALUATION HERE*
-
-## Audio Transcription
-
-Groq offers Whisper models for fast audio transcription. Here's how to use Groq's audio capabilities with ellmer:
-
-```{r audio-transcription}
-# Groq supports Whisper models for audio transcription
-# Available Groq audio models:
-groq_audio_models <- c(
-  "whisper-large-v3",
-  "distil-whisper-large-v3-en"
-)
-
-# Function to transcribe audio using Groq
-transcribe_with_groq <- function(audio_file, model = "whisper-large-v3") {
-  tryCatch({
-    # Note: This is conceptual - actual implementation would depend on 
-    # ellmer's audio transcription interface
-    
-    cat("To transcribe audio with Groq:\n")
-    cat("1. Upload your audio file (mp3, wav, etc.)\n")
-    cat("2. Use Groq's Whisper model for fast transcription\n")
-    cat("3. Compare results with original transcript\n")
-    
-    # Placeholder for when ellmer supports audio transcription
-    # result <- transcribe(audio_file, provider = groq_provider, model = model)
-    
-    return("Audio transcription with Groq Whisper would be very fast and accurate")
-  }, error = function(e) {
-    return(paste("Error transcribing audio:", e$message))
-  })
-}
-
-# Example usage
-audio_example_result <- transcribe_with_groq("new-mexico-chuck-wagon-etiquette.mp3")
-cat(audio_example_result)
-
-# Alternative: Analyze a transcript using Groq's text models
-sample_transcript <- "Well, you know, when you're out on the trail with a chuck wagon, there's certain rules you gotta follow. First thing is, you always help the cook. Don't matter if you're the trail boss or just a regular cowhand, when cook needs help, you help. Second thing is, you never ride your horse through the cook's area. That's just common courtesy."
-
-transcript_analysis <- chat(
-  paste("Analyze this audio transcript and extract the main rules or guidelines mentioned:", sample_transcript),
-  provider = groq_provider,
-  model = default_model
-)
-
-cat("\nTranscript Analysis:\n")
-cat(transcript_analysis)
-```
-
-**Your Evaluation:** How did the audio transcription compare to the original transcript?
-
-
-## Exploring Different Groq Models
-
-Let's compare responses from different Groq models to see their strengths:
-
-```{r model-comparison}
-# Test prompt
-test_prompt <- "Explain the difference between supervised and unsupervised machine learning in simple terms."
-
-# Function to safely test different Groq models
-test_groq_model <- function(prompt, model_name) {
-  tryCatch({
-    response <- chat(
-      prompt,
-      provider = groq_provider,
-      model = model_name
-    )
-    return(response)
-  }, error = function(e) {
-    return(paste("Error with", model_name, ":", e$message))
-  })
-}
-
-# Compare different Groq models
-groq_models_to_test <- c(
-  "llama-3.3-70b-versatile",    # Best overall, slower
-  "llama-3.1-8b-instant",      # Fastest responses
-  "mixtral-8x7b-32768"         # Good for long contexts
-)
-
-for(model in groq_models_to_test) {
-  cat("\n--- Groq Model:", model, "---\n")
-  
-  # Time the response (Groq is known for speed)
-  start_time <- Sys.time()
-  response <- test_groq_model(test_prompt, model)
-  end_time <- Sys.time()
-  
-  cat("Response time:", round(as.numeric(end_time - start_time, units = "secs"), 2), "seconds\n")
-  cat("Response:", substr(response, 1, 300), "...\n")
-}
-
-# Test Groq's speed with a longer prompt
-speed_test_prompt <- paste(
-  "Analyze the following data processing workflow and suggest optimizations:",
-  "1. Read CSV files from multiple sources",
-  "2. Clean and standardize data formats", 
-  "3. Perform statistical analysis",
-  "4. Generate visualizations",
-  "5. Export results to dashboard",
-  "Focus on efficiency and accuracy improvements."
-)
-
-cat("\n--- Speed Test with Complex Prompt ---\n")
-speed_start <- Sys.time()
-speed_response <- chat(
-  speed_test_prompt,
-  provider = groq_provider,
-  model = "llama-3.1-8b-instant"  # Fastest model
-)
-speed_end <- Sys.time()
-
-cat("Complex analysis completed in:", round(as.numeric(speed_end - speed_start, units = "secs"), 2), "seconds\n")
-cat("Response length:", nchar(speed_response), "characters\n")
-```
-
-## Advanced Prompting Techniques with Groq
-
-Let's explore advanced prompting strategies using Groq's fast models:
-
-```{r advanced-prompting}
-# Chain of Thought prompting - Groq handles this very well
-cot_prompt <- "Let's think step by step. A store sells apples for $2 per pound and oranges for $3 per pound. If someone buys 4 pounds of apples and 2 pounds of oranges, what's the total cost?"
-
-cot_response <- chat(
-  cot_prompt,
-  provider = groq_provider,
-  model = default_model
-)
-cat("Chain of Thought Response:\n")
-cat(cot_response)
-
-cat("\n" , rep("=", 50), "\n")
-
-# Few-shot prompting example - great for Groq's speed
-few_shot_prompt <- "
-Here are some examples of converting informal text to formal business language:
-
-Informal: 'Hey, can you send me that report ASAP?'
-Formal: 'Could you please provide the report at your earliest convenience?'
-
-Informal: 'The meeting was a total disaster.'
-Formal: 'The meeting did not proceed as planned and requires follow-up.'
-
-Now convert this informal text to formal:
-Informal: 'This project is way behind schedule and we're gonna miss the deadline.'
-Formal:"
-
-few_shot_response <- chat(
-  few_shot_prompt,
-  provider = groq_provider,
-  model = default_model
-)
-cat("Few-shot Learning Response:\n")
-cat(few_shot_response)
-
-cat("\n" , rep("=", 50), "\n")
-
-# JSON mode prompting - excellent for data extraction
-json_prompt <- "Extract information from this news headline and return only valid JSON with keys: topic, sentiment, entities, urgency_level.
-
-Headline: 'Local School Board Votes to Increase Teacher Salaries by 15% Amid Budget Concerns'
-
-Return only JSON, no other text:"
-
-json_response <- chat(
-  json_prompt,
-  provider = groq_provider,
-  model = default_model
-)
-cat("JSON Extraction Response:\n")
-cat(json_response)
-
-# Try to parse the JSON
-tryCatch({
-  parsed_json <- fromJSON(json_response)
-  cat("\nSuccessfully parsed JSON:\n")
-  print(parsed_json)
-}, error = function(e) {
-  cat("\nJSON parsing note:", e$message)
-})
-```
-
-## Best Practices for Using Groq with ellmer
-
-```{r groq-best-practices}
-# Groq-specific best practices
-groq_best_practices <- function() {
-  cat("Groq API Best Practices:\n\n")
-  
-  cat("1. SPEED: Groq is optimized for fast inference\n")
-  cat("   - Use for real-time applications\n")
-  cat("   - Great for batch processing\n\n")
-  
-  cat("2. MODEL SELECTION:\n")
-  cat("   - llama-3.3-70b-versatile: Best quality, moderate speed\n")
-  cat("   - llama-3.1-8b-instant: Fastest responses\n")
-  cat("   - mixtral-8x7b-32768: Long context windows\n\n")
-  
-  cat("3. PROMPTING:\n")
-  cat("   - Use 'No yapping' to reduce verbose responses\n")
-  cat("   - JSON mode works well for structured output\n")
-  cat("   - Clear, direct prompts work best\n\n")
-}
-
-groq_best_practices()
-
-# Demonstrate error handling with retry logic
-safe_groq_chat <- function(prompt, max_retries = 3, delay = 1) {
-  for(attempt in 1:max_retries) {
-    tryCatch({
-      response <- chat(
-        prompt,
-        provider = groq_provider,
-        model = default_model
-      )
-      return(response)
-    }, error = function(e) {
-      if(attempt == max_retries) {
-        return(paste("Failed after", max_retries, "attempts:", e$message))
-      }
-      cat("Attempt", attempt, "failed, retrying in", delay, "seconds...\n")
-      Sys.sleep(delay)
-    })
-  }
-}
-
-# Rate limiting helper (Groq has generous limits but still good practice)
-estimate_tokens_groq <- function(text) {
-  # Rough estimation: 1 token ≈ 4 characters (similar to other models)
-  estimated_tokens <- ceiling(nchar(text) / 4)
-  
-  # Groq context limits by model
-  context_limits <- list(
-    "llama-3.3-70b-versatile" = 128000,
-    "llama-3.1-8b-instant" = 128000,
-    "mixtral-8x7b-32768" = 32768
-  )
-  
-  cat("Estimated tokens:", estimated_tokens, "\n")
-  cat("Model context limit:", context_limits[[default_model]], "\n")
-  
-  if(estimated_tokens > context_limits[[default_model]]) {
-    warning("Prompt may exceed context limit!")
-  }
-  
-  return(estimated_tokens)
-}
-
-# Example usage
-example_prompt <- "Analyze this news data and provide insights about trends in local journalism..."
-estimate_tokens_groq(example_prompt)
-```
-
-## Conclusion
-
-This notebook has demonstrated how to use Groq's fast LLM inference through the ellmer R package:
-
-- **Text summarization** with Groq's Llama models
-- **Structured data extraction** using JSON mode
-- **Model comparison** across Groq's model family
-- **Advanced prompting** techniques optimized for Groq
-- **Speed benchmarking** to showcase Groq's performance advantage
-
-### Key Groq Advantages:
-1. **Speed**: Extremely fast inference times
-2. **Cost-effective**: Competitive pricing for high-volume usage  
-3. **Quality**: State-of-the-art open-source models (Llama, Mixtral)
-4. **Reliability**: Consistent performance and uptime
-
-### Best Practices Learned:
-1. Choose the right model for your speed/quality tradeoff
-2. Use clear, direct prompts with "No yapping" for concise responses
-3. Leverage JSON mode for structured data extraction
-4. Implement retry logic for production applications
-5. Monitor token usage even with generous limits
 
