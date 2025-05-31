@@ -34,7 +34,7 @@ We'll use one of Groq's recent additions, the Llama 4 Scout model from Meta. In 
 
 # Set the model
 chat <- chat_groq(
-  model = "meta-llama/llama-4-scout-17b-16e-instruct"
+  model = "meta-llama/llama-4-scout-17b-16e-instruct",
 )
 
 chat$chat("Give me 20 names for a pet turtle")
@@ -43,43 +43,13 @@ chat$chat("Give me 20 names for a pet turtle")
 
 ## Text Models and Summarization
 
-Let's start by fetching web content and summarizing it using an LLM. We need to add some custom headers to mimic a browser because Nieman Lab doesn't like folks scraping their content.
+Let's start with this [Nieman Lab piece](https://www.niemanlab.org/2025/02/meet-the-journalists-training-ai-models-for-meta-and-openai/) - read that. Then we'll load the text:
 
-```{r web-scraping}
-# Function to fetch and clean web content
-fetch_article <- function(url) {
-  tryCatch({
-    page <- read_html(GET(url, 
-        add_headers(
-      "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-      "Accept" = "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-      "Accept-Language" = "en-US,en;q=0.5",
-      "Accept-Encoding" = "gzip, deflate",
-      "Connection" = "keep-alive",
-      "Referer" = "https://www.google.com/"
-    ),
-      timeout(30)
-    ))
-    # Extract story content using css selectors
-    content <- page |> 
-      html_nodes(".simple-leftstream, article, main, .content") |> 
-      html_text() |>
-      paste(collapse = "\n")
-    
-    # Clean up whitespace
-    content <- gsub("\\s+", " ", content)
-    content <- trimws(content)
-    
-    return(content)
-  }, error = function(e) {
-    return(paste("Error fetching content:", e$message))
-  })
-}
-
-# Fetch the Nieman Lab article
-article_url <- "https://www.niemanlab.org/2025/02/meet-the-journalists-training-ai-models-for-meta-and-openai/"
-article_text <- fetch_article(article_url)
+```{r read-article}
+article_text <- readLines("nieman_lab.txt", warn = FALSE)
 ```
+
+And then we'll have Llama 4 summarize it:
 
 ```{r summarize-article}
 
@@ -93,7 +63,7 @@ Compare this summary to the original article. How well did the LLM capture the k
 
 ## Structured Data Extraction
 
-Ellmer does support the production of structured output (data), but Groq doesn't yet support that, so we're going to do things the old-fashioned way. Let's work with the Maryland attorney sanctions data and convert it to JSON that we can then turn into a dataframe:
+Ellmer does support the production of structured output (data), but Groq doesn't yet, so we're going to do things the old-fashioned way. Let's work with some descriptions of Maryland attorney sanctions and convert it to JSON that we can then turn into a dataframe:
 
 ```{r load-sanctions-data}
 # Read the sanctions text file
@@ -108,8 +78,8 @@ cat(paste(head(sanctions_text, 10), collapse = "\n"))
 ```{r extract-structured-data}
 # Create prompt for structured data extraction
 structured_response <- chat$chat(paste(
-  "produce only a list of JSON objects based on the text with the following keys: name, sanction, date, description.",
-  "The date should be in the yyyy-mm-dd format. No yapping.",
+  "produce only a list of JSON objects based on the supplied text with the following keys: name, sanction, date, description.",
+  "The date should be in the yyyy-mm-dd format. Do not include any introductory text, no yapping.",
   "\nText:",
   sanctions_content
 ))
@@ -120,17 +90,12 @@ cat("Structured Data Response:\n")
 cat(structured_response)
 ```
 
-Then we can clean that up a bit and turn it into tidy data:
+Then we can turn it into tidy data:
 
 ```{r parse-json-data}
 # Parse the JSON response
 
-json_content <- structured_response |>
-  gsub("```json\n?", "", .) |>
-  gsub("\n?```", "", .) |>
-  trimws()
-
-sanctions_df <- fromJSON(json_content) |>
+sanctions_df <- fromJSON(structured_response) |>
   as_tibble() |>
   mutate(date = ymd(date))
 
@@ -150,15 +115,15 @@ license_number <- chat$chat("what is the license number from this image?", image
 
 ```
 
+Text extraction is hard, and for complicated jobs, you definitely need to check the results. We'll use an image of Black population figures by city from 1930. Check those results and compare them to the image in this repository.
 
 ```{r}
 
-pdf <- content_image_file("BlackPop1930.pdf")
+black_pop <- content_image_url("https://raw.githubusercontent.com/dwillis/llm-djnf25/refs/heads/main/BlackPop1930.png")
 
-extract_csv <- chat$chat("what is the license number from this image?", image)
+extract_csv <- chat$chat("Extract the information in this image into a CSV file, preserving the rows and columns and ensuring accuracy", black_pop)
 
 ```
-
 
 
 ### Your Turn: Find an image from the web and ask Llama 4 a question about it using `content_image_url()`
