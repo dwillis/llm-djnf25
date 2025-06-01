@@ -1,10 +1,10 @@
 # LLM Playground with R and ellmer
 
-This notebook demonstrates how to interact with Large Language Models using the `ellmer` package in R. We'll explore text generation, structured data extraction, and various AI capabilities.
+This notebook demonstrates how to interact with Large Language Models using the `ellmer` package in R (<https://ellmer.tidyverse.org/>). We'll explore text generation, structured data extraction, and various AI capabilities.
 
 ## Setup
 
-You'll need to set up your Groq API key. Get one from https://console.groq.com/keys, and then set it in your .Renviron file using `usethis::edit_r_environ()`. Restart R for it to take effect.
+You'll need to set up your Groq API key. Get one from <https://console.groq.com/keys>, creating an account if you need to, and then set it as GROQ_API_KEY=<your key> (no quotes needed) in your .Renviron file using `usethis::edit_r_environ()`. Do the same thing for Google at <https://aistudio.google.com/apikey>, setting the key as GOOGLE_API_KEY=<your google key>. Restart R for them to take effect.
 
 Then, let's install and load the necessary packages:
 
@@ -28,18 +28,22 @@ library(rvest)
 
 ### Testing Out Groq Using Llama 4
 
-We'll use one of Groq's recent additions, the Llama 4 Scout model from Meta. In ellmer, you construct a chat object like this:
+We'll use one of Groq's recent additions, the Llama 4 Scout model from Meta. In ellmer, you construct a chat object like this. You can provide a system prompt to help with overall guidance.
 
 ```{r groq-setup}
 
 # Set the model
 chat <- chat_groq(
-  model = "meta-llama/llama-4-scout-17b-16e-instruct",
+  model = "meta-llama/llama-4-scout-17b-16e-instruct"
 )
 
 chat$chat("Give me 20 names for a pet turtle")
 
 ```
+
+## How Newsrooms are Using LLMs
+
+Let's take a look at the following piece: [How ProPublica Uses AI Responsibly in Its Investigations](https://www.propublica.org/article/using-ai-responsibly-for-reporting)
 
 ## Text Models and Summarization
 
@@ -101,7 +105,38 @@ sanctions_df <- fromJSON(structured_response) |>
 
 ```
 
-**Your Evaluation:** How well did the LLM perform on this data extraction task? How should we evaluate it?
+How well did the LLM perform on this data extraction task? How should we evaluate it?
+
+## Semi-Structured Data, and More of It
+
+Groq's open models, like Llama, have limits on how much information you can provide to them. If you have a lot of text, such as [this example of foreign gifts given to U.S. officials](https://raw.githubusercontent.com/dwillis/all-foreign-gifts-around-us/refs/heads/main/text/2024-31509.txt), Google's Gemini models are a better solution because they have a much larger "context window", meaning they can accept (and work with) a lot more input material. Google also allows you to upload documents such as PDFs.
+
+We'll be working with listings from the Federal Register describing gifts given to U.S. government officials by officials from foreign governments. Turning this:
+
+![](before.png)
+
+Into something like this:
+
+![](final_output.png)
+
+Setting up a Gemini chat with ellmer is similar to what we did with Groq: there's a specific function and we supply the model.
+
+```{r}
+
+gemini_chat <- chat_google_gemini(model="gemini-2.5-flash-preview-04-17")
+
+text <- readLines("foreign_gifts.txt")
+
+gifts_response <- gemini_chat$chat(paste(
+  "produce only a list of JSON objects based on the supplied text with the following keys: name_and_title, gift_description, date, value, foreign_donor, circumstances",
+  "The date should be in the yyyy-mm-dd format. Do not include any introductory text, no yapping.",
+  "\nText:",
+  text
+))
+
+```
+
+
 
 ## Vision Models (Image Analysis)
 
@@ -121,13 +156,21 @@ Text extraction is hard, and for complicated jobs, you definitely need to check 
 
 black_pop <- content_image_url("https://raw.githubusercontent.com/dwillis/llm-djnf25/refs/heads/main/BlackPop1930.png")
 
-extract_csv <- chat$chat("Extract the information in this image into a CSV file, preserving the rows and columns and ensuring accuracy", black_pop)
+extract_csv <- chat$chat("Extract all of the information in this image into a CSV file, preserving the rows and columns and ensuring accuracy", black_pop)
 
 ```
 
 
-### Your Turn: Find an image from the web and ask Llama 4 a question about it using `content_image_url()`
+Compare that to how Gemini does (we'll need to upload the image first using the `google_upload()` function):
 
+```{r}
+black_pop <- google_upload("BlackPop1930.png")
+
+extract_csv_gemini <- gemini_chat$chat("Extract all of the information in this image into a CSV file, preserving the rows and columns and ensuring accuracy", black_pop)
+```
+
+
+### Your Turn: Find an image from the web and ask Llama 4 a question about it using `content_image_url()`
 
 ```{r}
 
@@ -135,7 +178,6 @@ extract_csv <- chat$chat("Extract the information in this image into a CSV file,
 ```
 
 How well did the vision model perform on your image?
-
 
 ### Audio Models
 
